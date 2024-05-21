@@ -1,0 +1,82 @@
+---
+- name: Configure Minecraft server with Docker
+  hosts: minecraft
+  become: yes
+
+  tasks:
+    - name: Ensure all packages are up to date using yum command
+      raw: yum -y update
+
+    - name: Install Docker using yum command
+      raw: yum -y install docker
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add ec2-user to docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Pull Minecraft server Docker image
+      docker_image:
+        name: itzg/minecraft-server
+        source: pull
+
+    - name: Ensure Minecraft data directory exists
+      file:
+        path: /opt/minecraft/data
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+
+    - name: Run Minecraft server container
+      docker_container:
+        name: minecraft
+        image: itzg/minecraft-server
+        state: started
+        restart_policy: always
+        ports:
+          - "25565:25565"
+        volumes:
+          - /opt/minecraft/data:/data
+        env:
+          EULA: "TRUE"
+          MEMORY: "1G"
+
+    - name: Create a systemd service for the Minecraft Docker container
+      copy:
+        dest: /etc/systemd/system/minecraft-docker.service
+        content: |
+          [Unit]
+          Description=Minecraft Server Docker Container
+          After=network.target docker.service
+          Requires=docker.service
+
+          [Service]
+          Restart=always
+          ExecStart=/usr/bin/docker start -a minecraft
+          ExecStop=/usr/bin/docker stop -t 60 minecraft
+          TimeoutStopSec=70
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd to apply the new service
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable the Minecraft Docker service
+      systemd:
+        name: minecraft-docker
+        enabled: yes
+
+    - name: Start the Minecraft Docker service
+      systemd:
+        name: minecraft-docker
+        state: started
